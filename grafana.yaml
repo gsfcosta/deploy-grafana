@@ -1,0 +1,134 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: grafana
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: grafana
+  name: grafana
+  namespace: grafana
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: dc
+                operator: In
+                values:
+                - glete
+      imagePullSecrets:
+        - name: registry.edge
+      containers:
+        - name: grafana
+          image: private.registry/grafana/front:IMAGE_TAG
+          imagePullPolicy: Always
+          # ports:
+          #   - containerPort: 3000
+          #     name: http-grafana
+          #     protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /robots.txt
+              port: 3000
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 2
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 3000
+            timeoutSeconds: 1
+          resources:
+            requests:
+              cpu: 300m
+              memory: 750Mi
+          volumeMounts:
+            - name: grafana-pv
+              mountPath: /var/lib/grafana
+            - name: config-volume
+              mountPath: /etc/grafana/conf
+              
+          env:
+            - name: DBNAME
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-database
+                  key: DBNAME
+            - name: DBUSER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-database
+                  key: DBUSER
+            - name: DBPASS
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-database
+                  key: DBPASS
+            - name: DBHOST
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-database
+                  key: DBHOST
+            - name: GF_INSTALL_PLUGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: grafana-ini
+                  key: GF_INSTALL_PLUGINS
+            - name: HTTP_PROXY
+              value: "http://127.0.0.1:3128"
+            - name: HTTPS_PROXY
+              value: "http://127.0.0.1:3128"
+            - name: NO_PROXY
+              value: "grafana,localhost,127.0.0.0/8,10.0.0.0/8,cattle-system.svc,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local,rancher.cattle-system,.intranet"
+      volumes:
+        - name: grafana-pv
+          persistentVolumeClaim:
+            claimName: grafana-pvc
+        - name: config-volume
+          configMap:
+            name: grafana-ini
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: grafana
+spec:
+  ports:
+    - port: 3000
+      protocol: TCP
+      targetPort: 3000
+  selector:
+    app: grafana
+  sessionAffinity: None
+  type: LoadBalancer

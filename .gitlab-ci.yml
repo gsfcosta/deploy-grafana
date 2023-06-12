@@ -1,0 +1,50 @@
+stages:
+  - build
+  - deploy
+  - deploy_latest
+
+build_job:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - export http_proxy=http://127.0.0.1:3128
+    - export https_proxy=http://127.0.0.1:3128
+    - docker build --build-arg http_proxy=http://127.0.0.1:3128 --build-arg https_proxy=http://127.0.0.1:3128 -t private.registry/grafana/front:$CI_COMMIT_SHA .
+    - docker push private.registry/grafana/front:$CI_COMMIT_SHA
+    - docker tag private.registry/grafana/front:$CI_COMMIT_SHA private.registry/grafana/front:latest
+    - docker push private.registry/grafana/front:latest
+  rules:
+    - changes:
+        - Dockerfile
+
+deploy_job:
+  stage: deploy
+  image:
+    name: private.registry/bitnami/kubectl:latest
+    entrypoint: ['']
+  script:
+    - export KUBECONFIG=/config.yaml
+    - sed -i "s/IMAGE_TAG/$CI_COMMIT_SHA/g" grafana.yaml
+    - kubectl apply -f grafana.yaml
+  rules:
+    - changes:
+        - Dockerfile
+
+deploy_latest_job:
+  stage: deploy_latest
+  image:
+    name: private.registry/bitnami/kubectl:latest
+    entrypoint: ['']
+  script:
+    - export KUBECONFIG=/config.yaml
+    - sed -i "s/IMAGE_TAG/latest/g" grafana.yaml
+    - kubectl apply -f grafana.yaml
+  rules:
+    - changes:
+        - Dockerfile
+      when: never
+    - changes:
+        - grafana.yaml
+
